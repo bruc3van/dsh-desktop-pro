@@ -107,8 +107,8 @@ importers:
         specifier: 0.2.2-rc.5
         version: 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)
       dsh-market-pro:
-        specifier: 1.10.0
-        version: 1.10.0(7c812718ef3bb64eb9a9e97775ee7262)
+        specifier: 1.13.1
+        version: 1.13.1(fe1b574298808f03ee9e06451ce1a56b)
       pnpm:
         specifier: 11.16.0
         version: 11.16.0
@@ -4349,30 +4349,31 @@ packages:
     resolution: {integrity: sha512-ZmdL2rui+eB2YwhsWzjInR8LldtZHGDoQ1ugH85ppHKwpUHL7j7rN0Ti9NCnGiQbhaZ11FpR+7ao1dNsmduNUg==}
     engines: {node: '>=12'}
 
-  dsh-market-pro@1.10.0:
-    resolution: {integrity: sha512-xzMQmR4ZNeN/HGnhyccdt901rOVFMswiy1QVJc6OuqbjJqMYgwKqHd8tP3kOXEoMpAPAND2ekM1ScOTUBvug9Q==}
-    engines: {dsh: '>=0.2.2-rc.3 <0.3.0'}
+  dsh-market-pro@1.13.1:
+    resolution: {integrity: sha512-qF09SpoHOIG05awwuc1AG7xcPZueymm3sLUYjJFt8ZCrN4jk8bee03fzXAus2oIhwWLFV32JOQcIUI357NFwgw==}
+    engines: {dsh: '>=0.2.2-rc.1 <0.3.0'}
     peerDependencies:
       '@deepseek-ai/cordis': ^4.0.4 || 4.0.5-alpha.2
       '@deepseek-ai/cordis-plugin-loader': ^1.0.5 || 1.0.6-alpha.2
-      '@deepseek-ai/dsh-api-remotes': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-api-session-controller': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-api-workspace-controller': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-client-locale': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-client-ui-conversation': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-client-ui-layout': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-client-ui-primitives': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-client-ui-renderer': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-client-ui-session': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-client-ui-sidebar': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-client-ui-sidebar-right': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-client-ui-slots': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-client-ui-workspace': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-settings': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-skill': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-storage-domain': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-typert-protocol': '>=0.2.2-rc.3 <0.3.0'
-      '@deepseek-ai/dsh-typert-registry': '>=0.2.2-rc.3 <0.3.0'
+      '@deepseek-ai/dsh-api-remotes': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-api-session-controller': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-api-workspace-controller': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-client-locale': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-client-ui-conversation': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-client-ui-layout': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-client-ui-plugin-manager': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-client-ui-primitives': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-client-ui-renderer': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-client-ui-session': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-client-ui-sidebar': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-client-ui-sidebar-right': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-client-ui-slots': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-client-ui-workspace': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-settings': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-skill': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-storage-domain': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-typert-protocol': '>=0.2.2-rc.1 <0.3.0'
+      '@deepseek-ai/dsh-typert-registry': '>=0.2.2-rc.1 <0.3.0'
       react: ^18.2.0
     peerDependenciesMeta:
       '@deepseek-ai/cordis':
@@ -4390,6 +4391,8 @@ packages:
       '@deepseek-ai/dsh-client-ui-conversation':
         optional: true
       '@deepseek-ai/dsh-client-ui-layout':
+        optional: true
+      '@deepseek-ai/dsh-client-ui-plugin-manager':
         optional: true
       '@deepseek-ai/dsh-client-ui-primitives':
         optional: true
@@ -11069,7 +11072,7 @@ snapshots:
 
   dotenv@16.4.5: {}
 
-  dsh-market-pro@1.10.0(7c812718ef3bb64eb9a9e97775ee7262):
+  dsh-market-pro@1.13.1(fe1b574298808f03ee9e06451ce1a56b):
     dependencies:
       yaml: 2.9.0
       zod: 4.6.6
@@ -11082,6 +11085,7 @@ snapshots:
       '@deepseek-ai/dsh-client-locale': 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-client-ui-conversation': 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-client-ui-layout': 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)
+      '@deepseek-ai/dsh-client-ui-plugin-manager': 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-client-ui-renderer': 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-client-ui-session': 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-client-ui-sidebar': 0.2.2-rc.5(@deepseek-ai/cordis@4.1.0)

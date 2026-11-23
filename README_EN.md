@@ -75,7 +75,7 @@ Start with the [enterprise deployment guide](docs/enterprise.md): try file mode 
 - It keeps running in the background after the window closes and reopens from the tray or menu bar.
 - An official Web UI already running on the machine is reused; otherwise the client starts and manages the bundled runtime. It can also connect to an address you specify.
 - On first launch it subscribes to a curated plugin index you can browse and install from on the Discover page. The client only adds the subscription; it does not install plugins for you.
-- Bundles [DSH Market Pro](https://github.com/bruc3van/dsh-market-pro) (enabled by default in personal mode and toggleable in Desktop settings): manage plugins, skills, and 33 curated / managed MCP servers in one place, with batch updates, post-install AI security review, and in-chat AI-native plugin & MCP discovery (`/dsh-market-pro`, `/dsh-mcp-pro`, toggleable anytime in market settings).
+- Bundles [DSH Market Pro](https://github.com/bruc3van/dsh-market-pro) (enabled by default in personal mode, toggleable in Desktop settings, and registered in the official **Plugins → Installed** list so you can check for updates, upgrade, disable, or uninstall it directly): manage plugins, skills, and 33 curated / managed MCP servers in one place, with batch updates, post-install AI security review, and in-chat AI-native plugin & MCP discovery (`/dsh-market-pro`, `/dsh-mcp-pro`, toggleable anytime in market settings).
 - It updates itself, and checks update packages against SHA-256 before installing.
 - Windows run sandboxed with context isolation, and navigation and permissions are restricted.
 

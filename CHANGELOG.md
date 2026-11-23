@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+- 修复内置插件市场 [DSH Market Pro](https://github.com/bruc3van/dsh-market-pro) 未显示在官方「插件 → 已安装」列表且无法检查更新的问题：客户端安装内置副本时同步以精确版本写入 `profiles/web/package.json` 的 `dependencies`，官方插件管理器现可将其识别为标准 registry 插件并支持检查更新、升级、停用与卸载；用户经官方升级后自动移交控制权不再覆盖或降级，经官方停用或卸载后重启不会自动重新启用或重装（可在插件页重新安装，或关闭再开启「桌面设置 → 数据环境 → 插件市场」开关恢复）。
+- 内置插件市场 [DSH Market Pro](https://github.com/bruc3van/dsh-market-pro) 升级至 `1.13.1`。
+
 ## [0.7.0] - 2026-11-21
 
 - 内置插件市场 [DSH Market Pro](https://github.com/bruc3van/dsh-market-pro) 升级至 `1.10.0`：新增 33 个精选 MCP 目录与 Agent 原生 MCP 选型/安全安装（`/dsh-mcp-pro`）、插件一键批量更新、顶部自更新按钮与 AI 批量更新工具/技能（`/dsh-market-pro`），并与官方 DSH UI 原语全面对齐。
