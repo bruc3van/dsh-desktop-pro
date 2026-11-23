@@ -16,6 +16,8 @@ export interface MarketInstallation {
   state: 'unknown' | 'missing' | 'incomplete' | 'registered' | 'unregistered'
   version?: string
   owned: boolean
+  uninstalled?: boolean
+  disabledInProfile?: boolean
 }
 
 /** Connection facts mirrored from the main process. */

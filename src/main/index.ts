@@ -64,7 +64,7 @@ import { homedir } from 'node:os'
 import {join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PRESET_SUBSCRIPTION_VARIABLE, type PresetSubscriptionRequest } from './preset-subscription-boot.ts'
-import { abandonBundledPlugin,BUNDLED_PLUGIN_NAME,inspectBundledPlugin,inspectMarketInstallation,withdrawBundledPlugin } from './bundled-plugin.ts'
+import { abandonBundledPlugin,BUNDLED_PLUGIN_NAME,clearBundledMarketUninstallRecord,inspectBundledPlugin,inspectMarketInstallation,withdrawBundledPlugin } from './bundled-plugin.ts'
 import { MARKET_BOOT_VARIABLE, type MarketBootRequest } from './bundled-market-boot.ts'
 import { createEnterpriseController, MANAGED_STATE_VARIABLE, type Readiness } from './enterprise/controller.ts'
 import { systemManagedDir } from './enterprise/managed-source.ts'
@@ -352,6 +352,7 @@ async function setBundledMarketEnabled(enabled: unknown, remoteCaller: boolean):
     if (!confirmed) return { enabled: loadSettings().bundledMarketDisabled !== true }
   }
   patchSettings({ bundledMarketDisabled: !enabled })
+  if (enabled) clearBundledMarketUninstallRecord(childHome())
   // Never swap or delete files underneath a live or adopted runtime.
   if (!enabled) bundledPluginSeatInUse = false
   return { enabled }

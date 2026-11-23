@@ -43,9 +43,14 @@ interface ProfileManifest {
 }
 
 const dependencySections = ['dependencies', 'optionalDependencies', 'devDependencies', 'peerDependencies'] as const
+const extraDependencySections = ['optionalDependencies', 'devDependencies', 'peerDependencies'] as const
 
 function declaresMarket(manifest: ProfileManifest): boolean {
   return dependencySections.some(section => Object.hasOwn(manifest[section] ?? {}, BUNDLED_PLUGIN_NAME))
+}
+
+function declaresMarketInExtraSections(manifest: ProfileManifest): boolean {
+  return extraDependencySections.some(section => Object.hasOwn(manifest[section] ?? {}, BUNDLED_PLUGIN_NAME))
 }
 
 /** A renamed user installation must never be loaded alongside our new bundle. */
@@ -165,6 +170,80 @@ interface SeatMarker {
 
 /** The marker's owner tag; anything else in that file is not ours. */
 const SEAT_OWNER = 'dsh-desktop'
+/** Profile-scoped record noting this client has seated the market here before. */
+const SEAT_STATE_FILE = '.dsh-desktop-market.json'
+
+function seatStatePath(dshHome: string): string {
+  return join(profileDir(dshHome), SEAT_STATE_FILE)
+}
+
+function hasSeededMarketRecord(dshHome: string): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(seatStatePath(dshHome), 'utf8')) as { owner?: unknown; seeded?: unknown } | null
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      && parsed.owner === SEAT_OWNER && parsed.seeded === true
+  } catch {
+    return false
+  }
+}
+
+function writeSeededMarketRecord(dshHome: string): void {
+  try {
+    writeAtomicText(seatStatePath(dshHome), JSON.stringify({ owner: SEAT_OWNER, seeded: true }, undefined, 2) + '\n')
+  } catch {
+    // Best effort: the profile manifest and package files are already committed.
+  }
+}
+
+/** Forget a previous uninstall so the next managed launch offers the bundled market again. */
+export function clearBundledMarketUninstallRecord(dshHome: string): void {
+  try {
+    rmSync(seatStatePath(dshHome), { force: true })
+  } catch {
+    // Best effort.
+  }
+}
+
+function pathExistsRaw(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function isOwnedSeatDir(dir: string): boolean {
+  try {
+    if (lstatSync(dir).isSymbolicLink()) return false
+  } catch {
+    return false
+  }
+  return readSeatMarker(dir) !== undefined
+}
+
+function hasOwnedSeatMarker(dshHome: string): boolean {
+  return isOwnedSeatDir(seatPath(dshHome)) || isOwnedSeatDir(legacySeatPath(dshHome))
+}
+
+function isOwnedDependency(manifest: ProfileManifest, dshHome: string, acceptedVersions?: ReadonlySet<string>): boolean {
+  if (declaresMarketInExtraSections(manifest)) return false
+  const declared = manifest.dependencies?.[BUNDLED_PLUGIN_NAME]
+  if (typeof declared !== 'string' || valid(declared) === null) return false
+  const seat = seatPath(dshHome)
+  if (!isOwnedSeatDir(seat)) return false
+  const markerVersion = readSeatMarker(seat)?.version
+  if (typeof markerVersion !== 'string') return false
+  return declared === markerVersion || (acceptedVersions?.has(declared) === true)
+}
+
+function isUserUninstalled(manifest: ProfileManifest, dshHome: string): boolean {
+  return hasSeededMarketRecord(dshHome)
+    && !declaresMarket(manifest)
+    && manifest.dsh?.profile?.bundles?.includes(BUNDLED_PLUGIN_NAME) !== true
+    && !pathExistsRaw(seatPath(dshHome))
+    && !pathExistsRaw(legacySeatPath(dshHome))
+}
 
 function readSeatMarker(dir: string): SeatMarker | undefined {
   try {
@@ -209,20 +288,23 @@ function writeManifest(dshHome: string, manifest: ProfileManifest): void {
 }
 
 /** A declaration or a nearer installed package is never ours to replace. */
-function userOwned(manifest: ProfileManifest, dshHome: string): boolean {
+function userOwned(manifest: ProfileManifest, dshHome: string, acceptedVersions?: ReadonlySet<string>): boolean {
   try {
     if (lstatSync(seatPath(dshHome)).isSymbolicLink()) return true
   } catch { /* no local installation */ }
-  return declaresMarket(manifest)
-    || (existsSync(join(seatPath(dshHome), 'package.json')) && readSeatMarker(seatPath(dshHome)) === undefined)
+  if (existsSync(join(seatPath(dshHome), 'package.json')) && readSeatMarker(seatPath(dshHome)) === undefined) return true
+  if (declaresMarketInExtraSections(manifest)) return true
+  if (Object.hasOwn(manifest.dependencies ?? {}, BUNDLED_PLUGIN_NAME)) {
+    return !isOwnedDependency(manifest, dshHome, acceptedVersions)
+  }
+  return false
 }
 
 /** Inspect an existing seat without changing a running server's profile. */
 export function inspectBundledPlugin(dshHome: string): SeatResult {
   const manifest = readManifest(dshHome)
   const listed = manifest?.dsh?.profile?.bundles?.includes(BUNDLED_PLUGIN_NAME) === true
-  const owned = manifest !== undefined && !userOwned(manifest, dshHome)
-    && (readSeatMarker(seatPath(dshHome)) !== undefined || readSeatMarker(legacySeatPath(dshHome)) !== undefined)
+  const owned = manifest !== undefined && !userOwned(manifest, dshHome) && hasOwnedSeatMarker(dshHome)
   return { seated: listed, added: false, owned: listed && owned }
 }
 
@@ -231,6 +313,8 @@ export function inspectMarketInstallation(dshHome: string): {
   state: 'unknown' | 'missing' | 'incomplete' | 'registered' | 'unregistered'
   version?: string
   owned: boolean
+  uninstalled?: boolean
+  disabledInProfile?: boolean
 } {
   const manifest = readManifest(dshHome)
   if (manifest === undefined) {
@@ -242,13 +326,16 @@ export function inspectMarketInstallation(dshHome: string): {
   let dir = seatPath(dshHome)
   try { lstatSync(dir) } catch { dir = legacySeatPath(dshHome) }
   const version = readPackageVersion(dir)
-  let exists = false
-  try { lstatSync(dir); exists = true } catch { /* absent */ }
+  const exists = pathExistsRaw(dir)
+  const state = version === undefined ? (exists || declared || listed ? 'incomplete' : 'missing')
+    : listed ? 'registered' : 'unregistered'
+  const owned = !userOwned(manifest, dshHome) && isOwnedSeatDir(dir)
   return {
-    state: version === undefined ? (exists || declared || listed ? 'incomplete' : 'missing')
-      : listed ? 'registered' : 'unregistered',
+    state,
     version,
-    owned: !declared && readSeatMarker(dir) !== undefined,
+    owned,
+    ...state === 'missing' && isUserUninstalled(manifest, dshHome) ? { uninstalled: true } : {},
+    ...state === 'unregistered' && owned && isOwnedDependency(manifest, dshHome) ? { disabledInProfile: true } : {},
   }
 }
 
@@ -300,7 +387,13 @@ function readPackageVersion(dir: string): string | undefined {
  * that catches this client mid-write must never find a half-written package
  * behind a name the profile lists.
  */
-function ensureSeatCopy(dshHome: string, pluginDir: string, version: string, takeover?: () => void): void {
+function ensureSeatCopy(
+  dshHome: string,
+  pluginDir: string,
+  version: string,
+  takeover?: () => void,
+  shouldAbort?: () => boolean,
+): boolean {
   const seat = seatPath(dshHome)
   let existing: ReturnType<typeof lstatSync> | undefined
   try {
@@ -321,9 +414,9 @@ function ensureSeatCopy(dshHome: string, pluginDir: string, version: string, tak
       if (marker === undefined && !takeover) throw new Error(seat + ' exists and was not created by this client')
       // The version alone is not proof the copy is intact: a marker survives
       // a tree something else emptied. One stat is cheap next to a re-copy.
-      if (!takeover && marker?.version === version && readPackageVersion(seat) === version) return
+      if (!takeover && marker?.version === version && readPackageVersion(seat) === version) return true
       const installed = readPackageVersion(seat)
-      if (!takeover && marker?.version === installed && installed && valid(installed) && valid(version) && gt(installed, version)) return
+      if (!takeover && marker?.version === installed && installed && valid(installed) && valid(version) && gt(installed, version)) return true
     }
   }
   // A held leftover may survive the sweep, including one from this process.
@@ -338,6 +431,10 @@ function ensureSeatCopy(dshHome: string, pluginDir: string, version: string, tak
   // no reason to know about.
   copyMarketTree(pluginDir, staging)
   writeFileSync(join(staging, SEAT_MARKER), JSON.stringify({ owner: SEAT_OWNER, version }, undefined, 2) + '\n')
+  if (shouldAbort?.() === true) {
+    rmSync(staging, { recursive: true, force: true })
+    return false
+  }
   // Keep the window where the seat name is empty as small as it can be.
   // `dsh.profile.bundles` lists this package, and a boot landing while the
   // name resolves to nothing fails `loadProfile` for everyone sharing the
@@ -375,6 +472,7 @@ function ensureSeatCopy(dshHome: string, pluginDir: string, version: string, tak
       // Swept on the next copy; `sweepStagingDirs` knows this name.
     }
   }
+  return true
 }
 
 /**
@@ -408,9 +506,42 @@ function writeAtomicText(file: string, text: string): void {
   const temporary = file + '.' + String(process.pid) + '.tmp'
   try {
     writeFileSync(temporary, text, { mode: 0o600 })
-    renameSync(temporary, file)
+    try {
+      renameSync(temporary, file)
+    } catch {
+      rmSync(file, { force: true })
+      renameSync(temporary, file)
+    }
   } finally {
     rmSync(temporary, { force: true })
+  }
+}
+
+function stripMarketFromPnpmLock(oldLock: string): { nextLock: string; changed: boolean } | undefined {
+  let parsed: unknown
+  try {
+    parsed = load(oldLock)
+  } catch {
+    return undefined
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+  const lock = parsed as { lockfileVersion?: unknown; importers?: Record<string, Partial<Record<typeof dependencySections[number], Record<string, unknown>>>> }
+  const version = typeof lock.lockfileVersion === 'string' || typeof lock.lockfileVersion === 'number'
+    ? String(lock.lockfileVersion) : ''
+  if (!/^9\.\d+$/.test(version) || !lock.importers?.['.']) return undefined
+  let changed = false
+  // Unreferenced package snapshots are valid in pnpm lockfiles. Preserve all
+  // snapshots and other importers so unrelated dependencies are untouched.
+  for (const section of dependencySections) {
+    const dependencies = lock.importers['.'][section]
+    if (dependencies && Object.hasOwn(dependencies, BUNDLED_PLUGIN_NAME)) {
+      Reflect.deleteProperty(dependencies, BUNDLED_PLUGIN_NAME)
+      changed = true
+    }
+  }
+  return {
+    nextLock: changed ? dump(lock, { lineWidth: -1, noRefs: true }) : oldLock,
+    changed,
   }
 }
 
@@ -438,19 +569,14 @@ function upgradeUserSeat(pluginDir: string, dshHome: string, runtime: SeatRuntim
   const oldLock = existsSync(lockFile) ? readFileSync(lockFile, 'utf8') : undefined
   let nextLock = oldLock
   if (oldLock !== undefined) {
-    const lock = load(oldLock) as { lockfileVersion?: unknown; importers?: Record<string, Partial<Record<typeof dependencySections[number], Record<string, unknown>>>> } | undefined
-    if (!lock || String(lock.lockfileVersion) !== '9.0' || !lock.importers?.['.']) return false
-    // Unreferenced package snapshots are valid in pnpm lockfiles. Preserve all
-    // snapshots and other importers so unrelated dependencies are untouched.
-    for (const section of dependencySections) {
-      const dependencies = lock.importers['.'][section]
-      if (dependencies) Reflect.deleteProperty(dependencies, BUNDLED_PLUGIN_NAME)
-    }
-    nextLock = dump(lock, { lineWidth: -1, noRefs: true })
+    const stripped = stripMarketFromPnpmLock(oldLock)
+    if (stripped === undefined) return false
+    nextLock = stripped.nextLock
   }
-  for (const section of dependencySections) {
+  for (const section of extraDependencySections) {
     if (manifest[section]) Reflect.deleteProperty(manifest[section], BUNDLED_PLUGIN_NAME)
   }
+  manifest.dependencies = { ...manifest.dependencies, [BUNDLED_PLUGIN_NAME]: bundled }
   ensureSeatCopy(dshHome, pluginDir, bundled, () => {
     runtime.validateTakeover?.()
     if (readFileSync(file, 'utf8') !== original
@@ -466,8 +592,21 @@ function upgradeUserSeat(pluginDir: string, dshHome: string, runtime: SeatRuntim
       throw error
     }
   })
+  writeSeededMarketRecord(dshHome)
   console.log('[desktop] bundled market upgraded: ' + installed + ' -> ' + bundled)
   return true
+}
+
+function stripStaleLockEntry(dshHome: string): void {
+  const lockFile = join(profileDir(dshHome), 'pnpm-lock.yaml')
+  if (!existsSync(lockFile)) return
+  try {
+    const oldLock = readFileSync(lockFile, 'utf8')
+    const stripped = stripMarketFromPnpmLock(oldLock)
+    if (stripped?.changed === true && stripped.nextLock !== oldLock) writeAtomicText(lockFile, stripped.nextLock)
+  } catch {
+    // Non-standard lockfiles stay untouched.
+  }
 }
 
 /** Remove staging and retired seat trees any earlier run left behind. */
@@ -588,6 +727,12 @@ export function seatBundledPlugin(pluginDir: string, dshHome: string, runtime: S
     if (result.seated) retirePreviousMarket(dshHome)
     return result
   }
+  if (isUserUninstalled(manifest, dshHome)) {
+    return { seated: false, added: false, owned: false }
+  }
+  if (isOwnedDependency(manifest, dshHome) && manifest.dsh?.profile?.bundles?.includes(BUNDLED_PLUGIN_NAME) !== true) {
+    return { seated: false, added: false, owned: false }
+  }
   const version = readPackageVersion(pluginDir)
   if (version === undefined) {
     abandonBundledPlugin(dshHome)
@@ -602,27 +747,61 @@ export function seatBundledPlugin(pluginDir: string, dshHome: string, runtime: S
     return { seated: false, added: false, error: 'the web profile declares no bundle list' }
   }
   try {
-    ensureSeatCopy(dshHome, pluginDir, version)
-    const added = commitProfileManifest(dshHome, fresh => {
+    const seatExistedBefore = pathExistsRaw(seatPath(dshHome))
+    const previousMarker = isOwnedSeatDir(seatPath(dshHome)) ? readSeatMarker(seatPath(dshHome))?.version : undefined
+    const acceptedVersions = typeof previousMarker === 'string' ? new Set([previousMarker]) : undefined
+    const copied = ensureSeatCopy(dshHome, pluginDir, version, undefined, () => {
+      const fresh = readManifest(dshHome)
+      if (fresh === undefined) return true
+      if (userOwned(fresh, dshHome, acceptedVersions)) return true
+      return fresh.dsh?.profile?.bundles?.includes(PREVIOUS_PLUGIN_NAME) === true
+        && hasUserOwnedPreviousMarket(fresh, dshHome)
+    })
+    if (!copied) return inspectBundledPlugin(dshHome)
+    const effectiveVersion = readPackageVersion(seatPath(dshHome)) ?? version
+    let added = false
+    let conflict = false
+    commitProfileManifest(dshHome, fresh => {
       // A package-manager install that arrived during the copy keeps ownership.
-      if (userOwned(fresh, dshHome)) return false
+      if (userOwned(fresh, dshHome, acceptedVersions)) {
+        conflict = true
+        return false
+      }
       const list = fresh.dsh?.profile?.bundles
-      if (!Array.isArray(list) || list.includes(BUNDLED_PLUGIN_NAME)) return false
-      if (list.includes(PREVIOUS_PLUGIN_NAME) && hasUserOwnedPreviousMarket(fresh, dshHome)) return false
-      list.push(BUNDLED_PLUGIN_NAME)
+      if (!Array.isArray(list)) return false
+      if (list.includes(PREVIOUS_PLUGIN_NAME) && hasUserOwnedPreviousMarket(fresh, dshHome)) {
+        conflict = true
+        return false
+      }
+      let changed = false
+      if (!list.includes(BUNDLED_PLUGIN_NAME)) {
+        list.push(BUNDLED_PLUGIN_NAME)
+        added = true
+        changed = true
+      }
+      if (fresh.dependencies?.[BUNDLED_PLUGIN_NAME] !== effectiveVersion) {
+        fresh.dependencies = { ...fresh.dependencies, [BUNDLED_PLUGIN_NAME]: effectiveVersion }
+        changed = true
+      }
       // Commit both names together; a failed manifest write must not leave the
       // previously working market removed before the replacement is registered.
       const previous = [join(profileDir(dshHome), 'node_modules', PREVIOUS_PLUGIN_NAME),
         join(dshHome, 'profiles', 'node_modules', PREVIOUS_PLUGIN_NAME)]
       if (previous.some(path => readSeatMarker(path) !== undefined)) {
         for (let index = list.length - 1; index >= 0; index--) {
-          if (list[index] === PREVIOUS_PLUGIN_NAME) list.splice(index, 1)
+          if (list[index] === PREVIOUS_PLUGIN_NAME) {
+            list.splice(index, 1)
+            changed = true
+          }
         }
       }
-      return true
+      return changed
     })
+    if (conflict && !seatExistedBefore) removeOwnedSeat(dshHome)
     const result = inspectBundledPlugin(dshHome)
     if (result.owned) {
+      if (previousMarker !== undefined && previousMarker !== effectiveVersion) stripStaleLockEntry(dshHome)
+      writeSeededMarketRecord(dshHome)
       retirePreviousMarket(dshHome)
       removeUnusedLegacySeat(dshHome, pluginDir)
     }
@@ -648,21 +827,30 @@ export function withdrawBundledPlugin(dshHome: string, pluginDir?: string, prese
   }
   const manifest = readManifest(dshHome)
   if (manifest === undefined || userOwned(manifest, dshHome)) return false
-  if (readSeatMarker(seatPath(dshHome)) === undefined && readSeatMarker(legacySeatPath(dshHome)) === undefined && !isKnownLegacyLink(dshHome, pluginDir)) return false
-  if (!Array.isArray(manifest.dsh?.profile?.bundles)) return false
+  if (!hasOwnedSeatMarker(dshHome) && !isKnownLegacyLink(dshHome, pluginDir)) return false
   try {
     return commitProfileManifest(dshHome, (fresh) => {
       // Re-checked on the fresh read: the user may have installed their own
       // copy between the two reads, and that copy is never withdrawn.
       if (userOwned(fresh, dshHome)) return false
+      let changed = false
       const bundles = fresh.dsh?.profile?.bundles
-      if (!Array.isArray(bundles)) return false
-      const next = bundles.filter(entry => entry !== BUNDLED_PLUGIN_NAME)
-      if (next.length === bundles.length) return false
-      const profile = fresh.dsh?.profile
-      if (profile === undefined) return false
-      profile.bundles = next
-      return true
+      if (Array.isArray(bundles)) {
+        const next = bundles.filter(entry => entry !== BUNDLED_PLUGIN_NAME)
+        if (next.length !== bundles.length) {
+          const profile = fresh.dsh?.profile
+          if (profile !== undefined) {
+            profile.bundles = next
+            changed = true
+          }
+        }
+      }
+      if (isOwnedDependency(fresh, dshHome) && fresh.dependencies !== undefined
+        && Object.hasOwn(fresh.dependencies, BUNDLED_PLUGIN_NAME)) {
+        Reflect.deleteProperty(fresh.dependencies, BUNDLED_PLUGIN_NAME)
+        changed = true
+      }
+      return changed
     })
   } catch {
     return false
@@ -683,5 +871,6 @@ export function abandonBundledPlugin(dshHome: string, pluginDir?: string): boole
   }
   removeOwnedSeat(dshHome)
   removeUnusedLegacySeat(dshHome, pluginDir)
+  clearBundledMarketUninstallRecord(dshHome)
   return withdrawn
 }

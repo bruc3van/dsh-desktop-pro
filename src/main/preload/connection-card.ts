@@ -1,4 +1,5 @@
 import { choiceControlsCss } from '../choice-controls.ts'
+import { formatMarketInstallationStatus } from '../market-status-copy.ts'
 import { installRestartAction } from '../restart-action.ts'
 import { installRuntimeSelection } from '../runtime-selection.ts'
 import { connection, type CompanySkillItem, type ConnectionStatus } from './bridge.ts'
@@ -416,31 +417,13 @@ export function injectEnhance(panel: Element): void {
     marketToggleEl.setAttribute('aria-checked', String(enabled))
   }
   const paintMarketInstallation = (status: ConnectionStatus): void => {
-    const m = status.bundledMarketInstallation
-    let line = ''
     marketRestartEl.hidden = !marketChanged || status.marketRestartAvailable !== true
     if (marketChanged && !marketError) {
       marketNoteEl.classList.remove('is-error')
       marketNoteEl.textContent = '已保存。下次由客户端启动本地服务时生效。'
         + (status.marketRestartAvailable === true ? '可立即重启，尝试应用更改。' : '')
     }
-    if (m === undefined || m.state === 'unknown') line = '无法确认本地安装状态。'
-    else if (m.state === 'missing') line = '本地未安装。'
-    else if (m.state === 'incomplete') line = '本地安装不完整。'
-    else line = '本地已安装' + (m.version !== undefined ? ' v' + m.version : '') + (m.state === 'unregistered'
-      ? '，未登记加载。' : '，已登记加载（不代表当前会话已生效）。')
-    if (status.mode !== 'local' && status.marketRestartAvailable !== true) {
-      line += ' 当前连接已有服务，此开关不会修改该服务；下次由客户端启动本地服务时生效。'
-    } else if (status.bundledMarketEnabled !== true) {
-      line += (m !== undefined && m.state === 'registered' && !m.owned)
-        ? ' 自动接入已关闭；当前用户安装不受此开关管理。'
-        : ' 自动接入已关闭，下次由客户端启动本地服务时会移除客户端管理的市场副本；开启后再重启可尝试恢复。'
-    } else if (m !== undefined && ((m.state === 'incomplete' && !m.owned) || (m.state === 'unregistered' && !m.owned))) {
-      line += ' 用户安装或残留阻止自动接入；请先通过插件管理完成卸载，再重启客户端。'
-    } else if (m !== undefined && m.state !== 'registered' && m.state !== 'unknown') {
-      line += ' 下次由客户端启动本地服务时尝试恢复内置副本；当前会话可能仍保留旧界面。'
-    }
-    marketStatusEl.textContent = line
+    marketStatusEl.textContent = formatMarketInstallationStatus(status, true)
   }
   const refreshMarket = async (): Promise<void> => {
     if (marketSaving || marketReading || !block.isConnected || marketBlockEl.hidden) return

@@ -38,7 +38,7 @@ try {
   const manifest = JSON.parse(await readFile(join(profileDir, 'package.json')))
   assert.ok(manifest.dsh.profile.bundles.includes('@deepseek-ai/dsh-web-app'))
   assert.ok(manifest.dsh.profile.bundles.includes(name))
-  assert.equal(manifest.dependencies[name], undefined)
+  assert.equal(manifest.dependencies[name], pinned)
   assert.match(await readFile(join(profileDir, 'pnpm-workspace.yaml'), 'utf8'), /autoInstallPeers: false/)
   const profile = loadProfileDirectory('dsh', profileDir, anchor)
   assert.equal(resolve(profile.layers.find(layer => layer.packageName === name).packageDir), resolve(marketDir))
@@ -47,7 +47,25 @@ try {
     assert.equal(realpathSync(resolution.entries.find(item => item.name === peer).packageDir), realpathSync(join(modules, peer)))
   }
   assert.deepEqual(marketPeerIssues(home, anchor), [])
-  console.log('✓ cold profile uses official defaults; patch and module come from its owned package with runtime peers')
+  // Verify with the real official PluginManager that the seated copy is visible
+  // in Installed Plugins and eligible for registry update checks.
+  const { PluginManager } = await import(pathToFileURL(join(modules, '@deepseek-ai/dsh-plugin-manager/lib/index.js')))
+  const manager = Object.assign(Object.create(PluginManager.prototype), {
+    profile: { name: 'web', dir: profileDir, installAnchor: anchor, cwd: profileDir, home, startedBundles: [] },
+    ctx: { loader: { entries: () => [] }, get: () => undefined },
+    managementBundles: new Set(),
+  })
+  const officialBundles = await manager.listBundles()
+  const marketBundle = officialBundles.find(bundle => bundle.name === name)
+  assert.ok(marketBundle, 'official PluginManager must list the bundled market')
+  assert.equal(marketBundle.installed, true)
+  assert.equal(marketBundle.enabled, true)
+  assert.equal(marketBundle.availability, 'profile')
+  assert.equal(marketBundle.version, pinned)
+  assert.equal(marketBundle.source, name + '@' + pinned)
+  assert.equal(marketBundle.removable, true)
+  assert.equal(marketBundle.update, 'registry')
+  console.log('✓ cold profile uses official defaults; official PluginManager lists bundled market as installed and registry-updatable')
 
   // User payloads are deliberately different, so a stale in-box patch cannot pass.
   for (const version of [pinned, '99.0.0']) {
@@ -84,7 +102,7 @@ try {
   await writeFile(join(upgradeProfile, 'package.json'), JSON.stringify({ dependencies: { [name]: '0.4.3' }, dsh: { profile: { bundles: [name] } } }))
   await prepareBundledMarket(entry, { ...request, home: upgradeHome })
   assert.equal(JSON.parse(await readFile(join(upgradePackage, 'package.json'))).version, pinned)
-  assert.equal(JSON.parse(await readFile(join(upgradeProfile, 'package.json'))).dependencies[name], undefined)
+  assert.equal(JSON.parse(await readFile(join(upgradeProfile, 'package.json'))).dependencies[name], pinned)
   const upgradedProfile = loadProfileDirectory('dsh', upgradeProfile, anchor)
   assert.equal(resolve(upgradedProfile.layers[0].packageDir), resolve(upgradePackage))
   assert.deepEqual(marketPeerIssues(upgradeHome), [])
@@ -96,30 +114,34 @@ try {
   const cycleProfile = join(cycleHome, 'profiles/web')
   const cyclePackage = join(cycleProfile, 'node_modules', name)
   const cycleRequest = { ...request, home: cycleHome }
-  const selfUninstall = async (retainFiles = false) => {
-    // The published market's in-box self-uninstall removes the bundle entry
-    // and its owned directory; Windows file handles can leave that directory.
+  const officialUninstall = async (retainFiles = false) => {
     const manifest = JSON.parse(await readFile(join(cycleProfile, 'package.json')))
     manifest.dsh.profile.bundles = manifest.dsh.profile.bundles.filter(value => value !== name)
+    if (manifest.dependencies) Reflect.deleteProperty(manifest.dependencies, name)
     await writeFile(join(cycleProfile, 'package.json'), JSON.stringify(manifest))
     if (!retainFiles) await rm(cyclePackage, { recursive: true, force: true })
   }
   await prepareBundledMarket(entry, cycleRequest)
-  await selfUninstall()
+  // A complete uninstall via official Plugins stays uninstalled across restarts.
+  await officialUninstall(false)
+  await prepareBundledMarket(entry, cycleRequest)
+  assert.equal(existsSync(cyclePackage), false)
+  assert.equal(JSON.parse(await readFile(join(cycleProfile, 'package.json'))).dsh.profile.bundles.includes(name), false)
+  // Toggling desktop setting off and back on clears the uninstall record and restores the bundled copy.
   await prepareBundledMarket(entry, { ...cycleRequest, mode: 'disabled' })
   assert.equal(existsSync(cyclePackage), false)
   await prepareBundledMarket(entry, cycleRequest)
   assert.equal(JSON.parse(await readFile(join(cyclePackage, 'package.json'))).version, pinned)
-  for (const retainFiles of [false, true]) {
-    await selfUninstall(retainFiles)
-    await prepareBundledMarket(entry, cycleRequest)
-    const loaded = loadProfileDirectory('dsh', cycleProfile, anchor)
-    assert.ok(loaded.layers.some(layer => layer.packageName === name))
-    assert.equal(JSON.parse(await readFile(join(cyclePackage, 'package.json'))).version, pinned)
-  }
+  assert.equal(JSON.parse(await readFile(join(cycleProfile, 'package.json'))).dependencies[name], pinned)
+  // A held directory leftover (without dependencies[name]) still recovers when enabled.
+  await officialUninstall(true)
+  await prepareBundledMarket(entry, cycleRequest)
+  const loadedCycle = loadProfileDirectory('dsh', cycleProfile, anchor)
+  assert.ok(loadedCycle.layers.some(layer => layer.packageName === name))
+  assert.equal(JSON.parse(await readFile(join(cyclePackage, 'package.json'))).version, pinned)
   await prepareBundledMarket(entry, { ...cycleRequest, mode: 'disabled' })
   assert.equal(existsSync(cyclePackage), false)
-  console.log('✓ self-uninstall filesystem outcomes restore when enabled, stay absent when disabled, and recover after re-enabling')
+  console.log('✓ official uninstall stays absent across restarts, setting toggle restores it, and held leftovers recover')
 
   // Reproduce an old shared npx peer that is optional and absent from the
   // current production runtime. It must not withdraw the bundled market.

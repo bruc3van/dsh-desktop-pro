@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const temp = await mkdtemp(join(tmpdir(), 'dsh-market-seat-'))
 const output = join(temp, 'seat.mjs')
 await build({ entryPoints: [join(root, 'src/main/bundled-plugin.ts')], bundle: true, platform: 'node', format: 'esm', outfile: output, logLevel: 'silent' })
-const { seatBundledPlugin, withdrawBundledPlugin, abandonBundledPlugin, inspectBundledPlugin, inspectMarketInstallation, runtimeRefusal, BUNDLED_PLUGIN_NAME: name } = await import(pathToFileURL(output))
+const { seatBundledPlugin, withdrawBundledPlugin, abandonBundledPlugin, clearBundledMarketUninstallRecord, inspectBundledPlugin, inspectMarketInstallation, runtimeRefusal, BUNDLED_PLUGIN_NAME: name } = await import(pathToFileURL(output))
 const runtime = { version: '0.1.5-rc.2', peerRanges: ['^0.1.5-rc.1'] }
 const marker = '.dsh-desktop-seat.json'
 const manifestPath = home => join(home, 'profiles/web/package.json')
@@ -103,20 +103,31 @@ try {
   assert.equal(seatBundledPlugin(payload, join(temp, 'missing'), runtime).seated, false)
   const owned = home()
   assert.deepEqual(seatBundledPlugin(payload, owned, runtime), { seated: true, added: true, owned: true })
+  assert.equal(read(owned).dependencies[name], '0.5.0')
   assert.equal(inspectBundledPlugin(owned).owned, true)
   assert.equal(existsSync(join(seat(owned), marker)), true)
   assert.equal(existsSync(legacy(owned)), false)
   assert.equal(seatBundledPlugin(payload, owned, runtime).added, false)
   const updated = pkg(join(temp, 'updated'), '0.5.1')
+  const ownedLock = join(dirname(manifestPath(owned)), 'pnpm-lock.yaml')
+  writeFileSync(ownedLock, dump({ lockfileVersion: '9.0', importers: { '.': { dependencies: {
+    [name]: { specifier: '0.5.0', version: '0.5.0' }, other: { specifier: '1.0.0', version: '1.0.0' },
+  } } } }))
   seatBundledPlugin(updated, owned, runtime)
   assert.equal(JSON.parse(readFileSync(join(seat(owned), 'package.json'))).version, '0.5.1')
+  assert.equal(read(owned).dependencies[name], '0.5.1')
+  assert.equal(load(readFileSync(ownedLock, 'utf8')).importers['.'].dependencies[name], undefined)
+  assert.deepEqual(load(readFileSync(ownedLock, 'utf8')).importers['.'].dependencies.other, { specifier: '1.0.0', version: '1.0.0' })
   assert.equal(read(owned).dsh.profile.bundles.filter(x => x === name).length, 1)
   assert.equal(withdrawBundledPlugin(owned), true)
+  assert.equal(read(owned).dependencies[name], undefined)
   assert.equal(existsSync(seat(owned)), true)
-  seatBundledPlugin(updated, owned, runtime)
+  assert.deepEqual(seatBundledPlugin(updated, owned, runtime), { seated: true, added: true, owned: true })
+  assert.equal(read(owned).dependencies[name], '0.5.1')
   assert.equal(abandonBundledPlugin(owned), true)
+  assert.equal(read(owned).dependencies[name], undefined)
   assert.equal(existsSync(seat(owned)), false)
-  console.log('✓ profile-local owned copy upgrades, withdraws and removes without duplicate bundles')
+  console.log('✓ profile-local owned copy writes exact dependency, upgrades with lock cleanup, withdraws and removes cleanly')
 
   const blockedStagingHome = home()
   const leftover = seat(blockedStagingHome) + '.' + process.pid + '.tmp'
@@ -156,16 +167,17 @@ try {
     const result = seatBundledPlugin(updated, dir, runtime)
     assert.equal(result.owned, true)
     assert.equal(result.error, undefined)
-    assert.equal(read(dir).dependencies[name], undefined)
+    assert.equal(read(dir).dependencies[name], '0.5.1')
     assert.equal(read(dir).dependencies.other, '1.0.0')
     const after = load(readFileSync(lockFile, 'utf8'))
     Reflect.deleteProperty(lock.importers['.'].dependencies, name)
     assert.deepEqual(after, lock)
     assert.equal(JSON.parse(readFileSync(join(seat(dir), 'package.json'))).version, '0.5.1')
     if (linked) assert.equal(JSON.parse(readFileSync(join(target, 'package.json'))).version, '0.4.3')
-    // An older client must not downgrade the migrated copy.
+    // An older client must not downgrade the migrated copy or its declared version.
     seatBundledPlugin(payload, dir, runtime)
     assert.equal(JSON.parse(readFileSync(join(seat(dir), 'package.json'))).version, '0.5.1')
+    assert.equal(read(dir).dependencies[name], '0.5.1')
   }
   for (const declaration of ['file:../custom', 'git+https://example.test/market', 'latest', '0.5.0', '99.0.0']) {
     const dir = home({ dependencies: { [name]: declaration }, listed: true })
@@ -226,8 +238,9 @@ try {
   const interrupted = home({ dependencies: { [name]: '0.4.3' }, listed: true })
   pkg(seat(interrupted), '0.5.1', true)
   assert.equal(seatBundledPlugin(updated, interrupted, runtime).owned, true)
-  assert.equal(read(interrupted).dependencies[name], undefined)
+  assert.equal(read(interrupted).dependencies[name], '0.5.1')
   abandonBundledPlugin(interrupted)
+  assert.equal(read(interrupted).dependencies[name], undefined)
   assert.equal(existsSync(seat(interrupted)), false)
   console.log('✓ custom declarations in every section survive; interrupted takeover completes on retry')
 
@@ -254,6 +267,83 @@ try {
   assert.equal(JSON.parse(readFileSync(join(seat(rollback), 'package.json'))).version, '0.4.3')
   assert.equal(existsSync(join(seat(rollback), marker)), false)
   console.log('✓ failed profile commit restores the old package, dependency and lockfile')
+
+  // Concurrent user install during copy aborts before swap and leaves no orphaned seat.
+  const raced = home()
+  const origWriteFileSync = fs.writeFileSync
+  let injectedRace = false
+  try {
+    fs.writeFileSync = (file, ...args) => {
+      const res = origWriteFileSync(file, ...args)
+      if (!injectedRace && typeof file === 'string' && file.endsWith(marker) && file.includes(raced)) {
+        injectedRace = true
+        const m = read(raced)
+        m.dependencies = { [name]: '0.6.0' }
+        m.dsh.profile.bundles.push(name)
+        origWriteFileSync(manifestPath(raced), JSON.stringify(m))
+      }
+      return res
+    }
+    syncBuiltinESMExports()
+    const racedResult = seatBundledPlugin(updated, raced, runtime)
+    assert.equal(injectedRace, true)
+    assert.equal(racedResult.owned, false)
+    assert.equal(racedResult.error, undefined)
+    assert.equal(existsSync(seat(raced)), false)
+    assert.equal(read(raced).dependencies[name], '0.6.0')
+  } finally {
+    fs.writeFileSync = origWriteFileSync
+    syncBuiltinESMExports()
+  }
+
+  // Malformed YAML and unsupported major lockfiles leave user installs untouched without error;
+  // pnpm 9.x minor versions and Windows EEXIST rename fallback still upgrade cleanly.
+  const malformedYaml = home({ dependencies: { [name]: '0.4.3' }, listed: true })
+  pkg(seat(malformedYaml), '0.4.3')
+  const malformedLock = join(dirname(manifestPath(malformedYaml)), 'pnpm-lock.yaml')
+  writeFileSync(malformedLock, ':::invalid: [yaml')
+  const malformedBefore = readFileSync(manifestPath(malformedYaml), 'utf8')
+  const malformedRes = seatBundledPlugin(updated, malformedYaml, runtime)
+  assert.equal(malformedRes.error, undefined)
+  assert.equal(malformedRes.owned, false)
+  assert.equal(readFileSync(manifestPath(malformedYaml), 'utf8'), malformedBefore)
+  assert.equal(readFileSync(malformedLock, 'utf8'), ':::invalid: [yaml')
+
+  const lockV10 = home({ dependencies: { [name]: '0.4.3' }, listed: true })
+  pkg(seat(lockV10), '0.4.3')
+  const lockV10File = join(dirname(manifestPath(lockV10)), 'pnpm-lock.yaml')
+  const lockV10Text = dump({ lockfileVersion: '10.0', importers: { '.': { dependencies: { [name]: { specifier: '0.4.3', version: '0.4.3' } } } } })
+  writeFileSync(lockV10File, lockV10Text)
+  assert.equal(seatBundledPlugin(updated, lockV10, runtime).owned, false)
+  assert.equal(readFileSync(lockV10File, 'utf8'), lockV10Text)
+
+  const lockV91 = home({ dependencies: { [name]: '0.4.3' }, listed: true })
+  pkg(seat(lockV91), '0.4.3')
+  const lockV91File = join(dirname(manifestPath(lockV91)), 'pnpm-lock.yaml')
+  writeFileSync(lockV91File, dump({ lockfileVersion: '9.1', importers: { '.': { dependencies: {
+    [name]: { specifier: '0.4.3', version: '0.4.3' }, keep: { specifier: '1.0.0', version: '1.0.0' },
+  } } } }))
+  let simulatedOverwriteError = false
+  try {
+    fs.renameSync = (from, to) => {
+      if (!simulatedOverwriteError && to === lockV91File) {
+        simulatedOverwriteError = true
+        throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' })
+      }
+      return rename(from, to)
+    }
+    syncBuiltinESMExports()
+    const v91Result = seatBundledPlugin(updated, lockV91, runtime)
+    assert.equal(simulatedOverwriteError, true)
+    assert.equal(v91Result.owned, true)
+    assert.equal(v91Result.error, undefined)
+    assert.equal(load(readFileSync(lockV91File, 'utf8')).importers['.'].dependencies[name], undefined)
+    assert.deepEqual(load(readFileSync(lockV91File, 'utf8')).importers['.'].dependencies.keep, { specifier: '1.0.0', version: '1.0.0' })
+  } finally {
+    fs.renameSync = rename
+    syncBuiltinESMExports()
+  }
+  console.log('✓ concurrent user install aborts cleanly; malformed/v10 lockfiles stay untouched; 9.x & overwrite fallback succeed')
 
   for (const version of ['0.1.4', '0.5.0', '99.0.0', 'git-custom']) {
     for (const listed of [false, true]) {
@@ -284,19 +374,52 @@ try {
   assert.equal(inspectMarketInstallation(lifecycle).state, 'missing')
   seatBundledPlugin(updated, lifecycle, runtime)
   assert.deepEqual(inspectMarketInstallation(lifecycle), { state: 'registered', version: '0.5.1', owned: true })
-  const unregisteredManifest = read(lifecycle)
-  unregisteredManifest.dsh.profile.bundles = []
-  writeFileSync(manifestPath(lifecycle), JSON.stringify(unregisteredManifest))
-  assert.equal(inspectMarketInstallation(lifecycle).state, 'unregistered')
-  seatBundledPlugin(updated, lifecycle, runtime)
-  assert.equal(inspectMarketInstallation(lifecycle).state, 'registered')
-  rmSync(seat(lifecycle), { recursive: true })
-  assert.equal(inspectMarketInstallation(lifecycle).state, 'incomplete')
-  seatBundledPlugin(updated, lifecycle, runtime)
-  assert.equal(inspectMarketInstallation(lifecycle).state, 'registered')
-  abandonBundledPlugin(lifecycle)
-  assert.equal(inspectMarketInstallation(lifecycle).state, 'missing')
-  console.log('✓ installation status follows disk changes; owned uninstall leftovers recover without claiming live activation')
+  assert.equal(read(lifecycle).dependencies[name], '0.5.1')
+
+  // Upgrading from an earlier client that omitted `dependencies[name]` backfills it.
+  const preDepClient = home({ listed: true })
+  pkg(seat(preDepClient), '0.5.1', true)
+  assert.deepEqual(seatBundledPlugin(updated, preDepClient, runtime), { seated: true, added: false, owned: true })
+  assert.equal(read(preDepClient).dependencies[name], '0.5.1')
+
+  // Disabling the bundle in the official Plugins page keeps dependencies[name] and stays disabled across restarts.
+  const disabledManifest = read(lifecycle)
+  disabledManifest.dsh.profile.bundles = ['@deepseek-ai/dsh-base']
+  writeFileSync(manifestPath(lifecycle), JSON.stringify(disabledManifest))
+  assert.deepEqual(inspectMarketInstallation(lifecycle), { state: 'unregistered', version: '0.5.1', owned: true, disabledInProfile: true })
+  assert.deepEqual(seatBundledPlugin(updated, lifecycle, runtime), { seated: false, added: false, owned: false })
+  assert.equal(read(lifecycle).dsh.profile.bundles.includes(name), false)
+  assert.equal(read(lifecycle).dependencies[name], '0.5.1')
+  // Abandoning an owned copy that was disabled in Plugins also drops its dependency cleanly.
+  assert.equal(abandonBundledPlugin(lifecycle), true)
+  assert.equal(read(lifecycle).dependencies[name], undefined)
+  assert.equal(existsSync(seat(lifecycle)), false)
+  assert.deepEqual(inspectMarketInstallation(lifecycle), { state: 'missing', version: undefined, owned: false })
+
+  // Re-seating after abandon works, and uninstalling via official Plugins (removing dep, bundle, and dir) is respected.
+  assert.deepEqual(seatBundledPlugin(updated, lifecycle, runtime), { seated: true, added: true, owned: true })
+  const uninstalledManifest = read(lifecycle)
+  uninstalledManifest.dsh.profile.bundles = ['@deepseek-ai/dsh-base']
+  Reflect.deleteProperty(uninstalledManifest.dependencies, name)
+  writeFileSync(manifestPath(lifecycle), JSON.stringify(uninstalledManifest))
+  rmSync(seat(lifecycle), { recursive: true, force: true })
+  assert.deepEqual(inspectMarketInstallation(lifecycle), { state: 'missing', version: undefined, owned: false, uninstalled: true })
+  assert.deepEqual(seatBundledPlugin(updated, lifecycle, runtime), { seated: false, added: false, owned: false })
+  assert.equal(existsSync(seat(lifecycle)), false)
+  clearBundledMarketUninstallRecord(lifecycle)
+  assert.deepEqual(seatBundledPlugin(updated, lifecycle, runtime), { seated: true, added: true, owned: true })
+
+  // Official manager update replaces the seat with a pnpm symlink and newer version; client yields ownership.
+  const officialUpdated = pkg(join(temp, 'official-updated'), '0.5.2')
+  rmSync(seat(lifecycle), { recursive: true, force: true })
+  symlinkSync(officialUpdated, seat(lifecycle), process.platform === 'win32' ? 'junction' : 'dir')
+  const upgradedManifest = read(lifecycle)
+  upgradedManifest.dependencies[name] = '0.5.2'
+  writeFileSync(manifestPath(lifecycle), JSON.stringify(upgradedManifest))
+  assert.deepEqual(seatBundledPlugin(updated, lifecycle, runtime), { seated: true, added: false, owned: false })
+  assert.equal(JSON.parse(readFileSync(join(seat(lifecycle), 'package.json'))).version, '0.5.2')
+  assert.equal(read(lifecycle).dependencies[name], '0.5.2')
+  console.log('✓ backfill, official disable, official uninstall + restore, and official update handoff all behave cleanly')
   const foreign = home({ listed: true })
   pkg(seat(foreign), 'unmanaged')
   seatBundledPlugin(payload, foreign, runtime)

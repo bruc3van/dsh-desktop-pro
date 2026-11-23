@@ -101,7 +101,7 @@ export async function prepareBundledMarket(entry: string, request: MarketBootReq
     const issues = marketPeerIssues(home, anchor)
     for (const issue of issues) console.warn('[desktop] market dependency drift: ' + issue)
     if (issues.length > 0 && result.owned) throw new Error('client-owned market has incompatible profile dependencies; repair the profile dependencies before enabling it')
-    console.log('[desktop] bundled market prepared: ' + (result.owned ? 'client-owned' : 'user-managed'))
+    console.log('[desktop] bundled market prepared: ' + (result.owned ? 'client-owned' : result.seated ? 'user-managed' : 'inactive'))
   } catch (error) {
     withdrawBundledPlugin(home, pluginDir)
     console.warn('[desktop] bundled market not offered: ' + (error instanceof Error ? error.message : String(error)))
