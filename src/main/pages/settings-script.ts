@@ -57,7 +57,7 @@ export function renderSettingsPageScript(chinese: boolean): string {
     + 'else if(u.phase==="unsupportedPlatform")line='
     + t('已有更新版本，但该版本没有发布本平台的安装包', 'A newer version exists, but this release ships no installer for this platform') + ';'
     + 'else if(u.phase==="available"&&u.info)line=' + t('发现 v', 'Found v') + '+u.info.availableVersion;'
-    + 'else if(u.phase==="downloading")line=' + t('下载中 ', 'Downloading ') + '+((u.progress&&u.progress.percent)||0)+"%"'
+    + 'else if(u.phase==="downloading")line=' + t('下载中', 'Downloading') + '+((u.progress&&u.progress.percent)?" "+u.progress.percent+"%":"…")'
     + '+(u.progress&&u.progress.downloaded?" · "+(u.progress.downloaded/1048576).toFixed(1)'
     + '+(u.progress.total?"/"+(u.progress.total/1048576).toFixed(1):"")+" MB":"");'
     + 'else if(u.phase==="installing")line=' + t('正在启动安装程序', 'Starting the installer') + ';'
@@ -69,7 +69,8 @@ export function renderSettingsPageScript(chinese: boolean): string {
     + '$("update-status").textContent=line;$("update-status").hidden=!line;'
     + '$("update-status").classList.toggle("error",!!failed);'
     + 'const bar=$("update-bar");bar.hidden=u.phase!=="downloading";'
-    + 'if(!bar.hidden)bar.firstElementChild.style.width=((u.progress&&u.progress.percent)||0)+"%";'
+    + 'const pct=(u.progress&&u.progress.percent)||0;bar.classList.toggle("is-indeterminate",!bar.hidden&&pct<=0);'
+    + 'if(!bar.hidden)bar.firstElementChild.style.width=pct+"%";'
     // notesHtml is rendered in the main process from the release Markdown.
     // Rebuilding it would reset the box's scroll position and drop any
     // selection, and this runs several times a second while downloading.

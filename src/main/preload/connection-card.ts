@@ -100,8 +100,17 @@ export function injectEnhance(panel: Element): void {
         border: 'var(--dsw-alias-border-l2,rgba(0,0,0,.1))',
         surface: 'var(--dsw-alias-bg-module-platform,rgb(245,246,247))',
       }),
-      '#' + UPDATE_ID + ' .dsh-update-bar{height:4px;margin:0 0 10px;border-radius:999px;corner-shape:round;background:var(--dsw-alias-bg-module-platform,rgb(245,246,247));overflow:hidden}',
-      '#' + UPDATE_ID + ' .dsh-update-bar span{display:block;height:100%;width:0;border-radius:999px;corner-shape:round;background:var(--dsw-alias-brand-primary,rgb(15,17,21));transition:width var(--ds-transition-duration,.2s) var(--ds-ease-in-out,ease)}',
+      // The buttons here are display:inline-flex, which outranks the user
+      // agent's [hidden] rule — without this the install offer stayed on
+      // screen with nothing to install, and clicking it reported a failure.
+      '#' + UPDATE_ID + ' [hidden]{display:none!important}',
+      '#' + UPDATE_ID + ' .dsh-update-bar{position:relative;height:6px;margin:2px 0 12px;border-radius:999px;corner-shape:round;background:var(--dsw-alias-border-l2,rgba(0,0,0,.08));overflow:hidden}',
+      '#' + UPDATE_ID + ' .dsh-update-bar span{position:absolute;top:0;bottom:0;left:0;width:0;min-width:6px;border-radius:inherit;corner-shape:round;background:var(--dsw-alias-brand-primary,rgb(77,107,254));transition:width .3s linear}',
+      // No percentage yet (or no content-length): a sliding segment says
+      // "working" instead of a dot that never moves.
+      '#' + UPDATE_ID + ' .dsh-update-bar.is-indeterminate span{width:30%!important;animation:dsh-update-slide 1.2s ease-in-out infinite}',
+      '@keyframes dsh-update-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}',
+      '@media(prefers-reduced-motion:reduce){#' + UPDATE_ID + ' .dsh-update-bar.is-indeterminate span{animation:none;width:100%!important;opacity:.35}}',
       '#' + UPDATE_ID + ' .dsh-enhance-actions{display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap}',
       // A glyph rather than a fourth button: the row keeps one primary action,
       // and this stays a way out rather than a competing choice.

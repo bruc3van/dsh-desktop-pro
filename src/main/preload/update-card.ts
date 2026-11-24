@@ -194,7 +194,9 @@ export function paintUpdateCard(state: UpdateState, english: boolean): void {
 
   const downloading = state.phase === 'downloading'
   barEl.hidden = !downloading
-  if (downloading) barFillEl.style.width = String(state.progress?.percent ?? 0) + '%'
+  const barPercent = state.progress?.percent ?? 0
+  barEl.classList.toggle('is-indeterminate', downloading && barPercent <= 0)
+  if (downloading) barFillEl.style.width = String(barPercent) + '%'
 
   const notes = state.info?.notes ?? ''
   notesEl.hidden = notes === ''
